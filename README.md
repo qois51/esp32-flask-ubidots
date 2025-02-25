@@ -1,5 +1,5 @@
 # Tugas Assignment 2 SIC - Team Bottlebound UNI331
-Sensor yang kami gunakan adalah DHT dan LDR
+Sensor yang kami gunakan adalah DHT11 dan push button
 
 ## API
 Untuk API nya kami gunakan flask yang dijalankan dengan mengexecute file ``server.py``

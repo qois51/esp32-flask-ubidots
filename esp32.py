@@ -2,6 +2,7 @@ import network
 import time
 import dht
 import machine
+import json
 import urequests  # For HTTP requests
 from umqtt.simple import MQTTClient
 
@@ -30,45 +31,61 @@ while not wifi.isconnected():
 print("✅ Connected to WiFi! IP:", wifi.ifconfig()[0])
 
 # ✅ Initialize MQTT Client
-mqtt_client = MQTTClient("ESP32", UBIDOTS_BROKER, UBIDOTS_PORT, user=UBIDOTS_TOKEN, password=UBIDOTS_TOKEN)
+def connect_mqtt():
+    global mqtt_client
+    try:
+        mqtt_client = MQTTClient("ESP32", UBIDOTS_BROKER, UBIDOTS_PORT, user=UBIDOTS_TOKEN, password=UBIDOTS_TOKEN)
+        mqtt_client.connect()
+        print("✅ Connected to Ubidots MQTT!")
+    except Exception as e:
+        print("❌ Failed to connect to Ubidots MQTT:", e)
 
-try:
-    mqtt_client.connect()
-    print("✅ Connected to Ubidots MQTT!")
-except Exception as e:
-    print("❌ Failed to connect to Ubidots!", e)
+connect_mqtt()  # First connection
 
-# ✅ Initialize Sensors (DHT11 & LDR)
+# ✅ Initialize Sensors (DHT11 & Button)
 dht_pin = machine.Pin(4)
 sensor = dht.DHT11(dht_pin)
-ldr_pin = machine.ADC(machine.Pin(34))  # GPIO34 for LDR
-ldr_pin.atten(machine.ADC.ATTN_11DB)  # 0 - 3.3V range
+
+button_pin = machine.Pin(21, machine.Pin.IN, machine.Pin.PULL_UP)  # Button on GPIO21
 
 while True:
     try:
+        # ✅ DHT11 Read (Prevent Timeout)
+        time.sleep(2)  # Delay sebelum membaca sensor DHT
         sensor.measure()
         temp = sensor.temperature()
         hum = sensor.humidity()
-        ldr_value = ldr_pin.read()  # Read ADC (0-4095)
+
+        # ✅ Read Button State
+        button_state = button_pin.value()  # 1 = Tidak Ditekan, 0 = Ditekan
 
         # ✅ JSON Data
         data = {
             "sensor_id": "esp32",
             "temperature": temp,
             "humidity": hum,
-            "ldr": ldr_value
+            "button": button_state  # Tambahkan status tombol
         }
-        json_data = '{"temperature": ' + str(temp) + ', "humidity": ' + str(hum) + ', "ldr": ' + str(ldr_value) + '}'
+        json_data = json.dumps(data)  # Convert dictionary to JSON string
+        ubi_data = '{"temperature": ' + str(temp) + ', "humidity": ' + str(hum) + ', "button": ' + str(button_state) + '}'
 
-        # ✅ Send data to Ubidots via MQTT
-        mqtt_client.publish(MQTT_TOPIC, json_data)
-        print("📡 Sent to Ubidots:", json_data)
+        # ✅ Send Data to Ubidots via MQTT
+        try:
+            mqtt_client.publish(MQTT_TOPIC, ubi_data)
+            print("📡 Sent to Ubidots:", ubi_data)
+        except Exception as e:
+            print("❌ MQTT Error:", e)
+            connect_mqtt()  # Reconnect jika MQTT gagal
 
-        # ✅ Send data to Flask server via HTTP
-        response = urequests.post(FLASK_SERVER, json=data, headers={"Content-Type": "application/json"})
-        print("🌍 Sent to Flask:", response.text)
+        # ✅ Send Data to Flask Server
+        try:
+            response = urequests.post(FLASK_SERVER, json=data, headers={"Content-Type": "application/json"})
+            print("🌍 Sent to Flask:", response.text)
+            response.close()  # Close connection
+        except Exception as e:
+            print("❌ Flask Server Error:", e)
 
     except Exception as e:
-        print("❌ Sensor or Network Error:", e)
+        print("❌ Sensor Error:", e)
 
     time.sleep(5)
